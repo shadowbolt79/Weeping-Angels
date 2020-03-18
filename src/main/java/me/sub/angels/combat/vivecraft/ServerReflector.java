@@ -2,6 +2,7 @@ package me.sub.angels.combat.vivecraft;
 
 import me.sub.angels.WeepingAngels;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.Entity;
 import net.minecraft.util.math.Vec3d;
 
 import java.lang.reflect.Constructor;
@@ -25,26 +26,14 @@ public class ServerReflector extends VivecraftReflector {
     private Method isVR;
 
     //Vivecraft Forge Extensions
+    private Field fVRPlayers;
+    private Field fEntities;
+    private Field fRotW, fRotX, fRotY, fRotZ;
+    private Field fPosition;
+    
     private Constructor<?> conQuaternion;
-
-    private Field fHead;
-    private Field fController0;
-    private Field fController1;
-
-    private Field fSeated;
-    private Field fWorldScale;
-
-    private Field fPosX;
-    private Field fPosY;
-    private Field fPosZ;
-    private Field fRotW;
-    private Field fRotX;
-    private Field fRotY;
-    private Field fRotZ;
-
-    private Method mGetPlayerData;
-    private Method mHasPlayerData;
-
+    
+    private Method mIsVRPlayer;
     private Method mVecMultiply;
 
     @Override
@@ -57,9 +46,6 @@ public class ServerReflector extends VivecraftReflector {
             Class<?> cVivePlayer = Class.forName("org.vivecraft.api.VivePlayer");
 
             fVivePlayers = cNetworkHelper.getDeclaredField("vivePlayers");
-
-            //mGetVivePlayer = fVivePlayers.getType().getMethod("get",Object.class);
-            //mContainsVivePlayer = fVivePlayers.getType().getMethod("containsKey",Object.class);
 
             mGetControllerDir = cVivePlayer.getDeclaredMethod("getControllerDir",int.class);
             mGetHMDDir = cVivePlayer.getDeclaredMethod("getHMDDir");
@@ -79,28 +65,20 @@ public class ServerReflector extends VivecraftReflector {
             enabled = 1;
             try{
                 Class<?> cVRPlayerData = Class.forName("com.techjar.vivecraftforge.util.VRPlayerData");
-                Class<?> cObjectInfo =  Class.forName("com.techjar.vivecraftforge.util.VRPlayerData$ObjectInfo");
-
-                fHead = cVRPlayerData.getDeclaredField("head");
-                fController0 = cVRPlayerData.getDeclaredField("controller0");
-                fController1 = cVRPlayerData.getDeclaredField("controller1");
-
-                fSeated = cVRPlayerData.getDeclaredField("seated");
-                fWorldScale = cVRPlayerData.getDeclaredField("worldScale");
-
-                fPosX = cObjectInfo.getDeclaredField("posX");
-                fPosY = cObjectInfo.getDeclaredField("posY");
-                fPosZ = cObjectInfo.getDeclaredField("posZ");
-                fRotW = cObjectInfo.getDeclaredField("rotW");
-                fRotX = cObjectInfo.getDeclaredField("rotX");
-                fRotY = cObjectInfo.getDeclaredField("rotY");
-                fRotZ = cObjectInfo.getDeclaredField("rotZ");
-
-                Class<?> cPlayerTracker = Class.forName("com.techjar.vivecraftforge.util.PlayerTracker");
-
-                mGetPlayerData = cPlayerTracker.getMethod("getPlayerData", EntityPlayer.class);
-                mHasPlayerData = cPlayerTracker.getMethod("hasPlayerData",EntityPlayer.class);
-
+                Class<?> cEntityVRObject =  Class.forName("com.techjar.vivecraftforge.entity.EntityVRObject");
+                Class<?> cProxyServer = Class.forName("com.techjar.vivecraftforge.proxy.ProxyServer");
+                
+                fVRPlayers = cProxyServer.getDeclaredField("vrPlayers");
+                fEntities = cVRPlayerData.getDeclaredField("entities");
+                
+                fRotW = cEntityVRObject.getDeclaredField("rotW");
+                fRotX = cEntityVRObject.getDeclaredField("rotX");
+                fRotY = cEntityVRObject.getDeclaredField("rotY");
+                fRotZ = cEntityVRObject.getDeclaredField("rotZ");
+                fPosition = cEntityVRObject.getDeclaredField("position");
+                
+                mIsVRPlayer = cProxyServer.getDeclaredMethod("isVRPlayer", EntityPlayer.class);
+                
                 Class<?> cQuaternion = Class.forName("com.techjar.vivecraftforge.util.Quaternion");
 
                 conQuaternion = cQuaternion.getConstructor(float.class,float.class,float.class,float.class);
@@ -132,7 +110,7 @@ public class ServerReflector extends VivecraftReflector {
                 }
             }
             else if(enabled==1) {
-                return (boolean)mHasPlayerData.invoke(null,player);
+                return (boolean)mIsVRPlayer.invoke(null,player);
             }
 
         } catch (Exception e) {
@@ -145,8 +123,8 @@ public class ServerReflector extends VivecraftReflector {
     @Override
     public Vec3d getHMDPos(EntityPlayer player) {
         try {
-            UUID uuid = player.getUniqueID();
             if(enabled==0) {
+                UUID uuid = player.getUniqueID();
                 //Network Character - attempt to get from NetworkHelper
                 Map<UUID,?> vivePlayers = (Map<UUID,? extends Object>)fVivePlayers.get(null);
                 if (vivePlayers.containsKey(uuid)) {
@@ -156,13 +134,12 @@ public class ServerReflector extends VivecraftReflector {
             }
             else if(enabled==1)
             {
-                Object playerHead = fHead.get(mGetPlayerData.invoke(null,player));
-
-                float X = fPosX.getFloat(playerHead);
-                float Y = fPosY.getFloat(playerHead);
-                float Z = fPosZ.getFloat(playerHead);
-
-                return new Vec3d(X,Y,Z);
+                Map<EntityPlayer, ?> vrPlayers = (Map<EntityPlayer,? extends Object>)fVRPlayers.get(null);
+                if(vrPlayers.containsKey(player)) {
+                    Object playerHead = ((List<? extends Object>)fEntities.get(vrPlayers.get(player))).get(0);
+                    if(playerHead!=null)
+                        return fPosition.get(playerHead);
+                }
             }
 
         } catch (Exception e) {
@@ -185,110 +162,23 @@ public class ServerReflector extends VivecraftReflector {
             }
             else if(enabled==1)
             {
-                Object playerHead = fHead.get(mGetPlayerData.invoke(null,player));
+                Map<EntityPlayer, ?> vrPlayers = (Map<EntityPlayer,? extends Object>)fVRPlayers.get(null);
+                if(vrPlayers.containsKey(player)) {
+                    Object playerHead = ((List<? extends Object>)fEntities.get(vrPlayers.get(player))).get(0);
+                    if(playerHead!=null){
+                        float W = fRotW.getFloat(playerHead);
+                        float X = fRotX.getFloat(playerHead);
+                        float Y = fRotY.getFloat(playerHead);
+                        float Z = fRotZ.getFloat(playerHead);
 
-                float W = fRotW.getFloat(playerHead);
-                float X = fRotX.getFloat(playerHead);
-                float Y = fRotY.getFloat(playerHead);
-                float Z = fRotZ.getFloat(playerHead);
+                        Object quaternion = conQuaternion.newInstance(W,X,Y,Z);
 
-                Object quaternion = conQuaternion.newInstance(W,X,Y,Z);
-
-                //mNormalize.invoke(quaternion);
-
-                return (Vec3d)mVecMultiply.invoke(quaternion,new Vec3d(0,0,-1));
+                        return (Vec3d)mVecMultiply.invoke(quaternion,new Vec3d(0,0,-1));
+                    }
+                }
             }
         } catch (Exception e) {
             WeepingAngels.LOGGER.warn("Vivecraft Server: Unknown Error Parsing getHMDRot", e);
-        }
-        return player.getLookVec();
-    }
-
-    @Override
-    public Vec3d getControllerPos(EntityPlayer player, int c) {
-        try {
-            UUID uuid = player.getUniqueID();
-            if(enabled==0) {
-                //Network Character - attempt to get from NetworkHelper
-                Map<UUID,?> vivePlayers = (Map<UUID,? extends Object>)fVivePlayers.get(null);
-                if (vivePlayers.containsKey(uuid)) {
-                    Object vivePlayer = vivePlayers.get(uuid);
-                    return (Vec3d) mGetControllerPos.invoke(vivePlayer,c);
-                }
-            }
-            else if(enabled==1)
-            {
-                Object playerData = mGetPlayerData.invoke(null,player);
-
-                if(fSeated.getBoolean(playerData))
-                {
-                    Object playerHMD = fHead.get(playerData);
-
-                    float Wr = fRotW.getFloat(playerHMD);
-                    float Xr = fRotX.getFloat(playerHMD);
-                    float Yr = fRotY.getFloat(playerHMD);
-                    float Zr = fRotZ.getFloat(playerHMD);
-
-                    Object quaternion = conQuaternion.newInstance(Wr,Xr,Yr,Zr);
-
-                    Vec3d dir = (Vec3d)mVecMultiply.invoke(quaternion,new Vec3d(0,0,-1));
-
-                    dir = dir.rotateYaw((float) Math.toRadians(c==0?-35:35));
-                    dir = new Vec3d(dir.x,0,dir.z);
-                    dir = dir.normalize();
-
-                    float worldScale = fWorldScale.getFloat(playerData);
-
-                    return new Vec3d(fPosX.getFloat(playerHMD),fPosY.getFloat(playerHMD),fPosZ.getFloat(playerHMD)).addVector(dir.x * 0.3 * worldScale,-0.4 * worldScale, dir.z * 0.3 * worldScale);
-                }
-                else {
-                    Object playerController = (c == 0) ? fController0.get(playerData) : fController1.get(playerData);
-
-                    float X = fPosX.getFloat(playerController);
-                    float Y = fPosY.getFloat(playerController);
-                    float Z = fPosZ.getFloat(playerController);
-
-                    return new Vec3d(X, Y, Z);
-                }
-            }
-
-        } catch (Exception e) {
-            WeepingAngels.LOGGER.warn("Vivecraft Server: Unknown Error Parsing getControllerPos", e);
-        }
-        return player.getPositionVector().add(0, 1.62, 0);
-    }
-
-    @Override
-    public Vec3d getControllerRot(EntityPlayer player, int c) {
-        try {
-            UUID uuid = player.getUniqueID();
-            if(enabled==0) {
-                //Network Character - attempt to get from NetworkHelper
-                Map<UUID,?> vivePlayers = (Map<UUID,? extends Object>)fVivePlayers.get(null);
-                if (vivePlayers.containsKey(uuid)) {
-                    Object vivePlayer = vivePlayers.get(uuid);
-                    return (Vec3d) mGetControllerDir.invoke(vivePlayer, c);
-                }
-            }
-            else if(enabled==1)
-            {
-                Object playerData = mGetPlayerData.invoke(null,player);
-
-                if(fSeated.getBoolean(playerData))c=0;
-
-                Object playerController = (c==0)?fController0.get(playerData):fController1.get(playerData);
-
-                float W = fRotW.getFloat(playerController);
-                float X = fRotX.getFloat(playerController);
-                float Y = fRotY.getFloat(playerController);
-                float Z = fRotZ.getFloat(playerController);
-
-                Object quaternion = conQuaternion.newInstance(W,X,Y,Z);
-
-                return (Vec3d)mVecMultiply.invoke(quaternion,new Vec3d(0,0,-1));
-            }
-        } catch (Exception e) {
-            WeepingAngels.LOGGER.warn("Vivecraft Server: Unknown Error Parsing getControllerRot", e);
         }
         return player.getLookVec();
     }
